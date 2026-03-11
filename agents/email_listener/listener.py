@@ -63,6 +63,17 @@ def process_email(raw_email: dict) -> InboundEmail | None:
         received_at     = raw_email["received_at"],
     )
     print(f"     ✅ 已存入数据库 ID={inbound.id}")
+
+    # 根据意图触发对应 Pipeline
+    from agents.product_agent.pipeline import run_product_pipeline
+    if parsed.intent == "product_update" and attachment_path and parsed.scheduled_at:
+        print(f"     🚀 触发商品上新 Pipeline...")
+        run_product_pipeline(
+            attachment_path=attachment_path,
+            scheduled_at=parsed.scheduled_at,
+            inbound_email=inbound,
+        )
+
     return inbound
 
 

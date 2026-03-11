@@ -40,9 +40,13 @@ def validate_row(row: pd.Series) -> ValidationResult:
 
 def load_and_validate(csv_path: str) -> tuple[list, list]:
     """
-    读取 CSV，返回 (可生成列表, 待补充列表)
+    读取 Excel 或 CSV，返回 (可生成列表, 待补充列表)
     """
-    df = pd.read_csv(csv_path)
+    path_lower = csv_path.lower()
+    if path_lower.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(csv_path)
+    else:
+        df = pd.read_csv(csv_path)
     print(f"📂 读取：{csv_path}，共 {len(df)} 条\n")
 
     ready, pending = [], []
