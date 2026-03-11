@@ -12,6 +12,7 @@ from tasks.models import InboundEmail
 from agents.shared.email_client import fetch_unread_emails
 from agents.email_listener.parser import parse_email
 from pathlib import Path
+import pandas as pd
 
 # 附件保存目录
 ATTACHMENT_DIR = Path("attachments")
@@ -73,6 +74,37 @@ def process_email(raw_email: dict) -> InboundEmail | None:
             scheduled_at=parsed.scheduled_at,
             inbound_email=inbound,
         )
+
+    if parsed.intent == "store_deactivate" and attachment_path and parsed.scheduled_at:
+        print(f"     🚀 触发门店下架 Pipeline...")
+
+        from stores.models import Store
+        from tasks.models import AgentTask
+
+        df = pd.read_csv(attachment_path)
+        store_codes = df["store_code"].tolist()
+
+        for _, row in df.iterrows():
+            Store.objects.get_or_create(
+                store_code=str(row["store_code"]),
+                defaults={
+                    "name": str(row.get("name", "")),
+                    "region": str(row.get("region", "")),
+                    "saleor_channel_id": str(row.get("saleor_channel_id", "")),
+                },
+            )
+
+        agent_task = AgentTask.objects.create(
+            task_type=AgentTask.TaskType.STORE_DEACTIVATE,
+            status=AgentTask.Status.PENDING,
+            scheduled_at=parsed.scheduled_at,
+            payload={
+                "store_codes": store_codes,
+                "attachment": attachment_path,
+                "reply_to": raw_email.get("sender", ""),
+            },
+        )
+        print(f"     AgentTask ID={agent_task.id}，状态：待人工确认")
 
     return inbound
 
