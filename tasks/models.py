@@ -31,3 +31,27 @@ class AgentTask(models.Model):
 
     def __str__(self):
         return f"{self.get_task_type_display()} - {self.scheduled_at}"
+
+
+class InboundEmail(models.Model):
+    class Intent(models.TextChoices):
+        PRODUCT_UPDATE   = 'product_update',   '商品更新'
+        STORE_DEACTIVATE = 'store_deactivate', '门店下架'
+        UNKNOWN          = 'unknown',          '未知'
+
+    subject          = models.CharField(max_length=512, verbose_name='邮件标题')
+    sender           = models.CharField(max_length=255, verbose_name='发件人')
+    intent           = models.CharField(max_length=30, choices=Intent.choices, default=Intent.UNKNOWN, verbose_name='意图')
+    parsed_schedule  = models.DateTimeField(null=True, blank=True, verbose_name='解析出的执行时间')
+    attachment_path  = models.CharField(max_length=512, blank=True, verbose_name='附件路径')
+    raw_body         = models.TextField(blank=True, verbose_name='邮件正文')
+    received_at      = models.DateTimeField(verbose_name='收件时间')
+    processed        = models.BooleanField(default=False, verbose_name='已处理')
+
+    class Meta:
+        verbose_name = '收件记录'
+        verbose_name_plural = '收件记录'
+        ordering = ['-received_at']
+
+    def __str__(self):
+        return f"{self.sender} - {self.subject}"
