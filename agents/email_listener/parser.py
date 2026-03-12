@@ -1,17 +1,19 @@
-# agents/email_listener/parser.py
 import json
+import re
 from datetime import datetime
-from dateutil import parser as dateparser
 from dataclasses import dataclass
+
+from dateutil import parser as dateparser
+
 from agents.shared.llm import chat_json
 
 
 @dataclass
 class ParsedEmail:
-    intent: str           # product_update / store_deactivate / unknown
+    intent: str  # product_update / store_deactivate / unknown
     scheduled_at: datetime | None  # 解析出的执行时间
-    confidence: str       # high / medium / low
-    reason: str           # LLM 的判断理由
+    confidence: str  # high / medium / low
+    reason: str  # LLM 的判断理由
 
 
 def parse_email(subject: str, body: str) -> ParsedEmail:
@@ -29,7 +31,7 @@ def parse_email(subject: str, body: str) -> ParsedEmail:
    - store_deactivate：涉及门店下架、关闭门店、停止营业
    - unknown：无法判断或不属于以上两类
 
-2. 邮件中提到的执行时间是什么？（如果没有明确时间，返回 null）
+2. 邮件中提到的执行时间是什么？请务必从标题或正文中抽取出明确的执行时间（例如：2025年3月15日09:00），并转换为“YYYY-MM-DD HH:MM:SS”格式。如果真的完全没有提到任何时间，才返回 null。
 
 3. 你的判断置信度：high / medium / low
 
@@ -43,18 +45,34 @@ def parse_email(subject: str, body: str) -> ParsedEmail:
 
     try:
         raw = chat_json(prompt)
-        raw = raw.strip().strip('`')
-        if raw.startswith('json'):
+        raw = raw.strip().strip("`")
+        if raw.startswith("json"):
             raw = raw[4:].strip()
         data = json.loads(raw)
 
-        # 解析时间字符串
+        # 解析时间字符串（先用 LLM 的结果，再用正则兜底）
         scheduled_at = None
-        if data.get("scheduled_at") and data["scheduled_at"] != "null":
+        scheduled_raw = data.get("scheduled_at")
+
+        if scheduled_raw and scheduled_raw != "null":
             try:
-                scheduled_at = dateparser.parse(data["scheduled_at"])
-            except:
-                pass
+                scheduled_at = dateparser.parse(scheduled_raw)
+            except Exception:
+                scheduled_at = None
+
+        # 如果 LLM 没给或解析失败，尝试从原始文本中用正则兜底抽取形如“2026年3月11日16:15”的时间
+        if scheduled_at is None:
+            text = f"{subject}\n{body}"
+            m = re.search(
+                r"(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})",
+                text,
+            )
+            if m:
+                year, month, day, hour, minute = map(int, m.groups())
+                try:
+                    scheduled_at = datetime(year, month, day, hour, minute)
+                except ValueError:
+                    scheduled_at = None
 
         return ParsedEmail(
             intent=data.get("intent", "unknown"),
@@ -64,26 +82,27 @@ def parse_email(subject: str, body: str) -> ParsedEmail:
         )
     except Exception as e:
         print(f"⚠ 解析失败：{e}")
-        return ParsedEmail(intent="unknown", scheduled_at=None, confidence="low", reason=str(e))
+        return ParsedEmail(
+            intent="unknown", scheduled_at=None, confidence="low", reason=str(e)
+        )
 
 
-# 直接运行测试
 if __name__ == "__main__":
-    # 模拟两种邮件测试
-    test_cases = [
-        {
-            "subject": "【商品更新】春季新品上新通知",
-            "body": "请于2025年3月15日09:00完成以下商品的上新工作，附件为商品清单。"
-        },
-        {
-            "subject": "门店下架通知 - 华南区",
-            "body": "由于品牌收缩策略，请于本月20日24:00前完成以下门店的下架操作，详见附件。"
-        },
+    # 简单本地测试
+    tests = [
+        (
+            "【商品更新】春季新品上新通知",
+            "请于2025年3月15日09:00完成以下商品的上新工作，附件为商品清单。",
+        ),
+        (
+            "【商品更新】春季新品上新通知1",
+            "请于2026年3月11日16:35完成以下商品的上新工作，附件为商品清单。",
+        ),
     ]
 
-    for t in test_cases:
-        print(f"\n📧 标题：{t['subject']}")
-        result = parse_email(t["subject"], t["body"])
+    for subject, body in tests:
+        print(f"\n📧 标题：{subject}")
+        result = parse_email(subject, body)
         print(f"   意图：{result.intent}")
         print(f"   时间：{result.scheduled_at}")
         print(f"   置信度：{result.confidence}")

@@ -5,8 +5,8 @@ from django.db import models
 class Product(models.Model):
     class Status(models.TextChoices):
         DRAFT      = 'draft',      '草稿（字段缺失）'
-        PENDING    = 'pending',    '待人工确认'
-        REVIEWING  = 'reviewing',  '待执行'
+        PENDING    = 'pending',    '待上新'
+        REVIEWING  = 'reviewing',  '执行中'
         PUBLISHED  = 'published',  '已上新'
 
     sku               = models.CharField(max_length=64, unique=True, verbose_name='SKU')

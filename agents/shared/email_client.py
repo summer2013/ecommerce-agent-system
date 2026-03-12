@@ -67,7 +67,9 @@ def fetch_unread_emails(keyword: str = None) -> list[dict]:
                 disposition  = str(part.get("Content-Disposition"))
 
                 if content_type == "text/plain" and "attachment" not in disposition:
-                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                    payload = part.get_payload(decode=True)
+                    charset = part.get_content_charset() or "utf-8"
+                    body = payload.decode(charset, errors="replace")
                 elif "attachment" in disposition:
                     filename = decode_str(part.get_filename())
                     if filename:

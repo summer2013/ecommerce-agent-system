@@ -8,23 +8,31 @@ from .models import AgentTask, InboundEmail
 class AgentTaskAdmin(admin.ModelAdmin):
     list_display    = ['task_type', 'status', 'scheduled_at', 'confirmed_by', 'created_at']
     list_filter     = ['task_type', 'status']
-    readonly_fields = ['created_at', 'executed_at', 'celery_task_id']
-    actions         = ['confirm_and_schedule', 'confirm_store_deactivate']
+    readonly_fields = ['created_at', 'executed_at', 'celery_task_id', 'payload']
+    actions         = ['confirm_tasks']
 
-    def confirm_and_schedule(self, request, queryset):
-        """人工确认并调度任务"""
+    def confirm_tasks(self, request, queryset):
+        """统一确认入口，根据任务类型分发到对应 Celery 任务"""
         from products.tasks import publish_products_task
+        from stores.tasks import deactivate_stores_task
 
         confirmed = 0
-        for task in queryset.filter(status=AgentTask.Status.PENDING):
-            now = timezone.now()
-            eta = task.scheduled_at
-            countdown = max(0, int((eta - now).total_seconds()))
+        skipped   = 0
 
-            celery_task = publish_products_task.apply_async(
-                args=[task.id],
-                countdown=countdown,
-            )
+        for task in queryset.filter(status=AgentTask.Status.PENDING):
+            countdown = max(0, int((task.scheduled_at - timezone.now()).total_seconds()))
+
+            if task.task_type == AgentTask.TaskType.PRODUCT_PUBLISH:
+                celery_task = publish_products_task.apply_async(
+                    args=[task.id], countdown=countdown
+                )
+            elif task.task_type == AgentTask.TaskType.STORE_DEACTIVATE:
+                celery_task = deactivate_stores_task.apply_async(
+                    args=[task.id], countdown=countdown
+                )
+            else:
+                skipped += 1
+                continue
 
             task.status         = AgentTask.Status.CONFIRMED
             task.confirmed_by   = request.user.username
@@ -32,43 +40,12 @@ class AgentTaskAdmin(admin.ModelAdmin):
             task.save()
             confirmed += 1
 
-        self.message_user(
-            request,
-            f"✅ 已确认 {confirmed} 个任务，将在计划时间自动执行",
-            messages.SUCCESS
-        )
+        msg = f"✅ 已确认 {confirmed} 个任务"
+        if skipped:
+            msg += f"，跳过 {skipped} 个未知类型"
+        self.message_user(request, msg, messages.SUCCESS)
 
-    confirm_and_schedule.short_description = "✅ 确认并调度执行"
-
-    def confirm_store_deactivate(self, request, queryset):
-        """人工确认门店下架任务"""
-        from stores.tasks import deactivate_stores_task
-
-        confirmed = 0
-        for task in queryset.filter(
-            status=AgentTask.Status.PENDING,
-            task_type=AgentTask.TaskType.STORE_DEACTIVATE,
-        ):
-            now = timezone.now()
-            countdown = max(0, int((task.scheduled_at - now).total_seconds()))
-
-            celery_task = deactivate_stores_task.apply_async(
-                args=[task.id],
-                countdown=countdown,
-            )
-            task.status = AgentTask.Status.CONFIRMED
-            task.confirmed_by = request.user.username
-            task.celery_task_id = celery_task.id
-            task.save()
-            confirmed += 1
-
-        self.message_user(
-            request,
-            f"✅ 已确认 {confirmed} 个门店下架任务",
-            messages.SUCCESS,
-        )
-
-    confirm_store_deactivate.short_description = "🏪 确认门店下架任务"
+    confirm_tasks.short_description = "✅ 确认并调度执行"
 
 
 @admin.register(InboundEmail)

@@ -1,0 +1,6 @@
+store_code,name,region,saleor_channel_id
+STORE001,上海旗舰店,华东,channel-shanghai-001
+STORE002,北京王府井店,华北,channel-beijing-001
+STORE003,广州天河店,华南,channel-guangzhou-001
+STORE004,深圳南山店,华南,channel-shenzhen-001
+STORE005,成都春熙路店,西南,channel-chengdu-001
