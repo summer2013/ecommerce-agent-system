@@ -171,7 +171,10 @@ def run_once():
 
 
 def run_forever(interval_seconds: int = 60):
-    """持续轮询收件箱"""
+    """
+    持续轮询收件箱（仅调试用，手动触发时可调用）。
+    生产环境使用 Celery Beat 定时触发 poll_email_task，见 agents/email_listener/tasks.py。
+    """
     while True:
         run_once()
         logger.info("等待 %s 秒后再次检查", interval_seconds)
@@ -180,5 +183,5 @@ def run_forever(interval_seconds: int = 60):
 
 if __name__ == "__main__":
     run_once()
-    # 默认每 60 秒轮询一次
+    # 默认每 60 秒轮询一次（生产用 Celery Beat，调试时可取消注释）
     # run_forever(60)
