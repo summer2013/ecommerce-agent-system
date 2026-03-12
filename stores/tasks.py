@@ -14,7 +14,7 @@ def deactivate_stores_task(self, agent_task_id: int):
     try:
         from django.utils import timezone
 
-        from agents.store_agent.graph import build_store_deactivate_graph
+        from agents.store_agent.graph import run_store_deactivate_graph
         from tasks.models import AgentTask
 
         agent_task = AgentTask.objects.get(id=agent_task_id)
@@ -22,16 +22,7 @@ def deactivate_stores_task(self, agent_task_id: int):
         agent_task.executed_at = timezone.now()
         agent_task.save()
 
-        graph = build_store_deactivate_graph()
-        final_state = graph.invoke(
-            {
-                "agent_task_id": agent_task_id,
-                "stores": [],
-                "current_index": 0,
-                "results": [],
-                "report": "",
-            }
-        )
+        final_state = run_store_deactivate_graph(agent_task_id)
 
         logger.info(f"门店下架任务完成：{agent_task_id}")
         return final_state["report"]

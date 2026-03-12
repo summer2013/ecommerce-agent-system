@@ -12,7 +12,10 @@ django.setup()
 from django.utils import timezone
 from langgraph.graph import END, StateGraph
 
+from agents.shared.logger import get_logger
 from agents.shared.saleor_client import deactivate_channel
+
+logger = get_logger(__name__)
 from agents.shared.screenshot import take_mock_screenshot
 from agents.shared.email_client import send_email
 from logs.models import OperationLog
@@ -36,7 +39,7 @@ def load_stores_node(state: StoreDeactivateState) -> StoreDeactivateState:
             "id", "store_code", "name", "saleor_channel_id"
         )
     )
-    print(f"\n📋 待下架门店：{len(stores)} 家")
+    logger.info("待下架门店：%s 家", len(stores))
     return {**state, "stores": stores, "current_index": 0, "results": []}
 
 
@@ -44,10 +47,10 @@ def deactivate_store_node(state: StoreDeactivateState) -> StoreDeactivateState:
     idx = state["current_index"]
     store = state["stores"][idx]
 
-    print(f"\n  [{idx + 1}/{len(state['stores'])}] 处理：{store['name']}（{store['store_code']}）")
+    logger.info("[%s/%s] 处理：%s（%s）", idx + 1, len(state["stores"]), store["name"], store["store_code"])
 
     api_result = deactivate_channel(store["saleor_channel_id"])
-    print(f"  API 结果：{'✅ 成功' if api_result['success'] else '❌ 失败'}")
+    logger.info("API 结果：%s", "成功" if api_result["success"] else "失败")
 
     screenshot_path = take_mock_screenshot(store["store_code"], store["name"])
 
@@ -107,7 +110,7 @@ def generate_report_node(state: StoreDeactivateState) -> StoreDeactivateState:
         report_lines.append(f"  {status} {r['store_code']} {r['name']} - {r['message']}")
 
     report = "\n".join(report_lines)
-    print(f"\n{report}")
+    logger.info("门店下架报告：%s", report)
 
     AgentTask.objects.filter(id=state["agent_task_id"]).update(status=AgentTask.Status.DONE)
 
@@ -120,14 +123,48 @@ def generate_report_node(state: StoreDeactivateState) -> StoreDeactivateState:
             body=report,
         )
         if ok:
-            print("  📧 结果报告已自动回复")
+            logger.info("结果报告已自动回复")
         else:
-            print("  ⚠ 结果报告发送失败")
+            logger.warning("结果报告发送失败")
 
     return {**state, "report": report}
 
 
+def run_store_deactivate_graph(agent_task_id: int):
+    """
+    执行门店下架 LangGraph。
+    异常时打印错误、将对应 AgentTask 标记为 FAILED 并重新抛出（供 Celery 重试）。
+    """
+    try:
+        graph = build_store_deactivate_graph()
+        return graph.invoke(
+            {
+                "agent_task_id": agent_task_id,
+                "stores": [],
+                "current_index": 0,
+                "results": [],
+                "report": "",
+            }
+        )
+    except Exception as e:
+        logger.exception("门店下架 Pipeline 异常：%s", e)
+        task = AgentTask.objects.filter(id=agent_task_id).first()
+        if task:
+            payload = dict(task.payload) if task.payload else {}
+            payload["error"] = str(e)
+            task.status = AgentTask.Status.FAILED
+            task.payload = payload
+            task.save(update_fields=["status", "payload"])
+        raise
+
+
 def build_store_deactivate_graph():
+    """
+    构建门店下架 LangGraph。
+    节点：load_stores → deactivate（循环）→ generate_report
+    条件边：每家门店处理完后判断是否还有待处理门店。
+    失败自动重试最多 3 次，最终失败写入操作日志。
+    """
     graph = StateGraph(StoreDeactivateState)
 
     graph.add_node("load_stores", load_stores_node)
@@ -167,7 +204,7 @@ if __name__ == "__main__":
         payload={"store_codes": ["STORE001", "STORE002"]},
     )
 
-    print(f"🚀 启动门店下架 Agent，任务 ID={task.id}")
+    logger.info("启动门店下架 Agent，任务 ID=%s", task.id)
     graph = build_store_deactivate_graph()
     _final_state = graph.invoke(
         {
@@ -179,4 +216,4 @@ if __name__ == "__main__":
         }
     )
 
-    print("\n✅ 执行完成")
+    logger.info("执行完成")

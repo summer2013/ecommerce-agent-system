@@ -14,9 +14,12 @@ django.setup()
 
 from tasks.models import AgentTask, InboundEmail
 from stores.models import Store
+from agents.shared.logger import get_logger
 from agents.shared.email_client import fetch_unread_emails
 from agents.email_listener.parser import parse_email
 from agents.product_agent.pipeline import run_product_pipeline
+
+logger = get_logger(__name__)
 
 ATTACHMENT_DIR = Path("attachments")
 ATTACHMENT_DIR.mkdir(exist_ok=True)
@@ -33,7 +36,7 @@ def save_attachment(filename: str, data: bytes) -> str:
 
 def handle_product_update(attachment_path: str, scheduled_at, inbound: InboundEmail):
     """处理商品更新邮件"""
-    print(f"     🛍 触发商品上新 Pipeline...")
+    logger.info("触发商品上新 Pipeline")
     run_product_pipeline(
         attachment_path=attachment_path,
         scheduled_at=scheduled_at,
@@ -43,7 +46,7 @@ def handle_product_update(attachment_path: str, scheduled_at, inbound: InboundEm
 
 def handle_store_deactivate(attachment_path: str, scheduled_at, inbound: InboundEmail):
     """处理门店下架邮件"""
-    print(f"     🏪 触发门店下架 Pipeline...")
+    logger.info("触发门店下架 Pipeline")
 
     # 读取附件里的门店列表
     try:
@@ -71,19 +74,27 @@ def handle_store_deactivate(attachment_path: str, scheduled_at, inbound: Inbound
         scheduled_at = scheduled_at,
         payload      = {"store_codes": store_codes, "attachment": attachment_path},
     )
-    print(f"     AgentTask ID={agent_task.id}，等待人工确认")
+    logger.info("AgentTask ID=%s，等待人工确认", agent_task.id)
 
 
 def process_email(raw_email: dict) -> InboundEmail | None:
+    """
+    处理单封邮件的完整流程：
+    1. LLM 解析意图和执行时间
+    2. 保存附件到本地
+    3. 写入收件记录（InboundEmail）
+    4. 根据意图触发对应 Pipeline
+    - product_update  → 商品上新 Pipeline
+    - store_deactivate → 门店下架 LangGraph
+    """
     subject = raw_email["subject"]
     body    = raw_email["body"]
 
-    print(f"  📧 处理：{subject}")
+    logger.info("处理邮件：%s", subject)
 
     # LLM 解析意图和执行时间
     parsed = parse_email(subject, body)
-    print(f"     意图：{parsed.intent}（{parsed.confidence}）")
-    print(f"     执行时间：{parsed.scheduled_at}")
+    logger.info("意图：%s（%s），执行时间：%s", parsed.intent, parsed.confidence, parsed.scheduled_at)
 
     # 保存附件
     attachment_path = ""
@@ -92,7 +103,7 @@ def process_email(raw_email: dict) -> InboundEmail | None:
         if att["filename"].endswith(supported):
             attachment_path = save_attachment(att["filename"], att["data"])
         else:
-            print(f"     ⚠ 不支持的附件格式：{att['filename']}，已跳过")
+            logger.warning("不支持的附件格式：%s，已跳过", att["filename"])
 
     existing = InboundEmail.objects.filter(
         subject=subject,
@@ -101,7 +112,7 @@ def process_email(raw_email: dict) -> InboundEmail | None:
     ).first()
 
     if existing and existing.processed:
-        print(f"     ⚠ 该邮件已处理过，跳过")
+        logger.warning("该邮件已处理过，跳过")
         return existing
 
     # 写入收件记录
@@ -117,11 +128,11 @@ def process_email(raw_email: dict) -> InboundEmail | None:
 
     # 根据意图触发对应 Pipeline（必须同时有附件和执行时间）
     if not attachment_path:
-        print(f"     ⚠ 无附件，跳过")
+        logger.warning("无附件，跳过")
         return inbound
 
     if not parsed.scheduled_at:
-        print(f"     ⚠ 未解析到执行时间，跳过")
+        logger.warning("未解析到执行时间，跳过")
         return inbound
 
     if parsed.intent == "product_update":
@@ -131,7 +142,7 @@ def process_email(raw_email: dict) -> InboundEmail | None:
         handle_store_deactivate(attachment_path, parsed.scheduled_at, inbound)
 
     else:
-        print(f"     ⚠ 未识别的意图：{parsed.intent}，跳过")
+        logger.warning("未识别的意图：%s，跳过", parsed.intent)
 
     # 标记邮件为已处理
     inbound.processed = True
@@ -141,26 +152,29 @@ def process_email(raw_email: dict) -> InboundEmail | None:
 
 
 def run_once():
-    print("🔍 开始检查收件箱...")
+    logger.info("开始检查收件箱")
     new_emails = []
-
     for keyword in KEYWORDS:
         emails = fetch_unread_emails(keyword=keyword)
         new_emails.extend(emails)
 
     if not new_emails:
-        print("  暂无新邮件")
-    else:
-        print(f"  发现 {len(new_emails)} 封相关邮件\n")
-        for raw in new_emails:
+        logger.info("暂无新邮件")
+        return
+
+    logger.info("发现 %s 封相关邮件", len(new_emails))
+    for raw in new_emails:
+        try:
             process_email(raw)
+        except Exception as e:
+            logger.exception("处理邮件失败：%s，跳过继续处理下一封", e)
 
 
 def run_forever(interval_seconds: int = 60):
     """持续轮询收件箱"""
     while True:
         run_once()
-        print(f"\n⏳ 等待 {interval_seconds} 秒后再次检查...\n")
+        logger.info("等待 %s 秒后再次检查", interval_seconds)
         time.sleep(interval_seconds)
 
 
