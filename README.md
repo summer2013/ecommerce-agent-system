@@ -17,61 +17,13 @@
 
 ---
 
-## 系统架构
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   触发层                              │
-│   Gmail 收件箱（IMAP）← 总部发送触发邮件 + Excel 附件  │
-└───────────────────────┬─────────────────────────────┘
-                        │ Celery Beat 每 60 秒轮询
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│                   解析层                              │
-│         Claude API（via OpenRouter）                  │
-│         解析邮件意图 + 提取执行时间                     │
-└──────────────┬──────────────────┬───────────────────┘
-               │ product_update   │ store_deactivate
-               ▼                  ▼
-┌──────────────────┐  ┌──────────────────────────────┐
-│  商品上新 Pipeline│  │     门店下架 LangGraph         │
-│  读取 Excel       │  │  load_stores                 │
-│  校验必填字段      │  │      ↓                       │
-│  写入数据库       │  │  deactivate（循环 + 重试）     │
-└────────┬─────────┘  │      ↓                       │
-         │            │  generate_report              │
-         └─────┬───────┘      ↓                       │
-               │         Playwright 截图               │
-               │         SMTP 自动回复邮件              │
-               ▼         └──────────────────────────┘
-┌─────────────────────────────────────────────────────┐
-│                   确认层（Human-in-the-Loop）         │
-│              Django Admin 人工审核确认                 │
-└───────────────────────┬─────────────────────────────┘
-                        │ confirm → Celery 定时调度
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│                   执行层                              │
-│   Celery Worker 在 scheduled_at 自动执行              │
-│   失败自动重试（最多 3 次，间隔 60 秒）                 │
-└───────────────────────┬─────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────┐
-│                   持久层                              │
-│   MySQL：商品 / 门店 / 任务 / 日志                     │
-│   Redis：Celery 队列 + 结果存储                        │
-└─────────────────────────────────────────────────────┘
-```
-
-
 ## 技术栈
 
 | 层 | 技术 |
 |----|------|
 | AI / Agent | Claude API (via OpenRouter), LangGraph, LangChain |
-| 任务调度 | Celery 5.x + Redis + Celery Beat |
-| Web / 后台 | Django 4.x + Django Admin + MySQL 8.0 |
+| 任务调度 | Celery 5.x + Redis + Celery Beat（每 60 秒轮询邮件）|
+| Web / 后台 | Django 4.x + 自定义 /ops/ 运营界面 + /admin/ + MySQL 8.0 |
 | 浏览器自动化 | Playwright (headless Chromium) |
 | 邮件 | imaplib（收件）+ smtplib（发件）|
 | 数据处理 | pandas + openpyxl |
@@ -79,25 +31,15 @@
 
 ---
 
-## Demo 演示
+## 项目截图
 
-### 商品上新全流程
+![Admin 后台](assets/admin.png)
 
-> 截图待补充：发送触发邮件 → Admin 任务队列 → 确认执行 → 商品状态变更 → 操作日志
+![任务列表](assets/tasks.png)
 
-![商品上新演示](docs/screenshots/demo1-product-publish.png)
+![邮件触发](assets/email.png)
 
-### 门店下架全流程
-
-> 截图待补充：发送触发邮件 → LangGraph 执行 → 截图留存 → 自动回复报告邮件
-
-![门店下架演示](docs/screenshots/demo2-store-deactivate.png)
-
-### Django Admin 管理后台
-
-> 截图待补充：任务队列确认操作 + 操作日志审计
-
-![管理后台](docs/screenshots/admin-dashboard.png)
+![商品更新](assets/update-products.png)
 
 ---
 
@@ -162,7 +104,9 @@ celery -A config beat --loglevel=info
 
 ### 6. 访问后台
 
-打开 http://127.0.0.1:8000/admin，用 superuser 账号登录。
+打开 http://127.0.0.1:8000/ops/，用账号登录进入运营后台。
+
+> 技术团队管理入口：http://127.0.0.1:8000/admin/
 
 ### 7. 触发测试
 
@@ -175,28 +119,6 @@ celery -A config beat --loglevel=info
 ```
 
 60 秒内 Beat 会自动检测到邮件，在 Admin 任务队列确认后，Celery 到点执行。
-
----
-
-## 项目结构
-
-```
-ecommerce-agent-system/
-├── agents/
-│   ├── email_listener/     # 邮件监听 + 意图解析
-│   ├── product_agent/      # 商品上新 Pipeline
-│   ├── store_agent/        # 门店下架 LangGraph
-│   └── shared/             # LLM 客户端、邮件、截图、日志
-├── config/                 # Django 配置 + Celery
-├── products/               # 商品 Django App
-├── stores/                 # 门店 Django App
-├── tasks/                  # 任务队列 + 收件记录
-├── logs/                   # 操作日志（只读）
-├── data/                   # 测试用 CSV 数据
-├── docker-compose.yml
-├── requirements.txt
-└── .env.example
-```
 
 ---
 
