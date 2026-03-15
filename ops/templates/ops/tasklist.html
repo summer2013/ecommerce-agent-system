@@ -1,0 +1,96 @@
+{% extends "ops/base.html" %}
+{% block title %}任务列表{% endblock %}
+{% block nav_tasks %}active{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div class="breadcrumb"><span>任务列表</span></div>
+</div>
+<div class="page-body">
+
+  <!-- 统计卡片 -->
+  <div class="stat-grid">
+    <a class="stat-card" href="?status=all" style="text-decoration:none">
+      <div class="stat-label">全部任务</div>
+      <div class="stat-value">{{ stats.all }}</div>
+    </a>
+    <a class="stat-card" href="?status=pending" style="text-decoration:none">
+      <div class="stat-label">待确认</div>
+      <div class="stat-value" style="color:#616161">{{ stats.pending }}</div>
+    </a>
+    <a class="stat-card" href="?status=confirmed" style="text-decoration:none">
+      <div class="stat-label">已确认待执行</div>
+      <div class="stat-value" style="color:#0d47a1">{{ stats.confirmed }}</div>
+    </a>
+    <a class="stat-card" href="?status=done" style="text-decoration:none">
+      <div class="stat-label">已完成</div>
+      <div class="stat-value" style="color:#1b5e20">{{ stats.done }}</div>
+    </a>
+    <a class="stat-card" href="?status=failed" style="text-decoration:none">
+      <div class="stat-label">执行失败</div>
+      <div class="stat-value" style="color:#880e4f">{{ stats.failed }}</div>
+    </a>
+  </div>
+
+  <!-- 筛选栏 -->
+  <div class="filter-bar">
+    <a class="filter-btn {% if status_filter == 'all' %}active{% endif %}" href="?status=all">全部</a>
+    <a class="filter-btn {% if status_filter == 'pending' %}active{% endif %}" href="?status=pending">待确认</a>
+    <a class="filter-btn {% if status_filter == 'confirmed' %}active{% endif %}" href="?status=confirmed">已确认</a>
+    <a class="filter-btn {% if status_filter == 'running' %}active{% endif %}" href="?status=running">执行中</a>
+    <a class="filter-btn {% if status_filter == 'done' %}active{% endif %}" href="?status=done">已完成</a>
+    <a class="filter-btn {% if status_filter == 'failed' %}active{% endif %}" href="?status=failed">执行失败</a>
+  </div>
+
+  <!-- 任务表格 -->
+  <div class="table-wrap">
+    <div class="table-toolbar">
+      <span class="table-title">指令任务</span>
+    </div>
+    {% if tasks %}
+    <table>
+      <thead>
+        <tr>
+          <th>任务ID</th>
+          <th>类型</th>
+          <th>计划执行时间</th>
+          <th>确认人</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in tasks %}
+        <tr>
+          <td style="font-family:monospace;color:#9e9e9e">#{{ task.id }}</td>
+          <td>{{ task.get_task_type_display }}</td>
+          <td>{{ task.scheduled_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ task.confirmed_by|default:"—" }}</td>
+          <td>
+            <span class="badge badge-{{ task.status }}">
+              {% if task.status == 'pending' %}⏳ 待确认
+              {% elif task.status == 'confirmed' %}⏱ 已确认
+              {% elif task.status == 'running' %}🔄 执行中
+              {% elif task.status == 'done' %}✓ 已完成
+              {% elif task.status == 'failed' %}✗ 失败
+              {% else %}{{ task.get_status_display }}{% endif %}
+            </span>
+          </td>
+          <td>
+            <a class="btn btn-default btn-sm" href="{% url 'ops_task_detail' task.id %}">查看</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="text-align:center;padding:64px;color:#9e9e9e">
+      <div style="font-size:40px;margin-bottom:12px">📭</div>
+      <div style="font-size:15px;font-weight:500;margin-bottom:6px">暂无任务记录</div>
+      <div style="font-size:13px">等待邮件触发或 Celery Beat 轮询</div>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "ops/base.html" %}
+{% block title %}任务详情 #{{ task.id }}{% endblock %}
+{% block nav_tasks %}active{% endblock %}
+
+{% block extra_style %}
+<style>
+  .detail-grid { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  .card { background: #fff; border: 1px solid #e0e0e0; margin-bottom: 16px; }
+  .card-header { padding: 14px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 10px; }
+  .card-title { font-weight: 600; font-size: 14px; }
+  .card-body { padding: 20px; }
+  .info-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
+  .info-row:last-child { border-bottom: none; }
+  .info-label { color: #9e9e9e; }
+  .timeline { padding: 4px 0; }
+  .timeline-item { display: flex; gap: 12px; padding-bottom: 20px; position: relative; }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-item::before { content:''; position:absolute; left:7px; top:20px; bottom:0; width:1px; background:#e0e0e0; }
+  .timeline-item:last-child::before { display:none; }
+  .timeline-dot { width:16px; height:16px; border-radius:50%; background:#e0e0e0; border:2px solid #fff; flex-shrink:0; margin-top:2px; position:relative; z-index:1; }
+  .timeline-dot.done { background:#212121; }
+  .timeline-dot.error { background:#e53935; }
+  .timeline-label { font-size:13px; font-weight:500; }
+  .timeline-time { font-size:11px; color:#9e9e9e; margin-top:2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="{% url 'ops_tasklist' %}" style="color:#9e9e9e;text-decoration:none">任务列表</a>
+    <span style="color:#9e9e9e">/</span>
+    <span>任务 #{{ task.id }}</span>
+  </div>
+  <div class="topbar-actions">
+    {% if task.status == 'pending' %}
+    <button class="btn btn-primary btn-sm" onclick="openModal('modalConfirm')">✅ 确认并调度执行</button>
+    {% endif %}
+  </div>
+</div>
+<div class="page-body">
+  <div class="detail-grid">
+    <div>
+      <!-- 任务信息 -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">任务 #{{ task.id }} · {{ task.get_task_type_display }}</span>
+          <span class="badge badge-{{ task.status }}" style="margin-left:auto">{{ task.get_status_display }}</span>
+        </div>
+        <div class="card-body">
+          <div class="info-row"><span class="info-label">任务类型</span><span>{{ task.get_task_type_display }}</span></div>
+          <div class="info-row"><span class="info-label">计划执行时间</span><span>{{ task.scheduled_at|date:"Y-m-d H:i:s" }}</span></div>
+          <div class="info-row"><span class="info-label">确认人</span><span>{{ task.confirmed_by|default:"未确认" }}</span></div>
+          <div class="info-row"><span class="info-label">创建时间</span><span>{{ task.created_at|date:"Y-m-d H:i:s" }}</span></div>
+          <div class="info-row"><span class="info-label">执行时间</span><span>{{ task.executed_at|date:"Y-m-d H:i:s"|default:"—" }}</span></div>
+          <div class="info-row"><span class="info-label">Celery Task ID</span><span style="font-family:monospace;font-size:12px">{{ task.celery_task_id|default:"—" }}</span></div>
+        </div>
+      </div>
+
+      <!-- 商品/门店清单 -->
+      {% if products %}
+      <div class="card">
+        <div class="card-header"><span class="card-title">商品清单（{{ products|length }} 件）</span></div>
+        <table>
+          <thead><tr><th>SKU</th><th>名称</th><th>分类</th><th>价格</th><th>状态</th></tr></thead>
+          <tbody>
+            {% for p in products %}
+            <tr>
+              <td style="font-family:monospace;font-size:12px">{{ p.sku }}</td>
+              <td>{{ p.name }}</td>
+              <td>{{ p.category }}</td>
+              <td>¥{{ p.price }}</td>
+              <td><span class="badge badge-{{ p.status }}">{{ p.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {% if stores %}
+      <div class="card">
+        <div class="card-header"><span class="card-title">门店清单（{{ stores|length }} 家）</span></div>
+        <table>
+          <thead><tr><th>门店编号</th><th>名称</th><th>地区</th><th>状态</th></tr></thead>
+          <tbody>
+            {% for s in stores %}
+            <tr>
+              <td style="font-family:monospace;font-size:12px">{{ s.store_code }}</td>
+              <td>{{ s.name }}</td>
+              <td>{{ s.region }}</td>
+              <td><span class="badge badge-{{ s.status }}">{{ s.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- 时间线 -->
+    <div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">操作日志</span></div>
+        <div class="card-body">
+          <div class="timeline">
+            {% for log in logs %}
+            <div class="timeline-item">
+              <div class="timeline-dot {% if log.result == 'success' %}done{% elif log.result == 'failed' %}error{% endif %}"></div>
+              <div>
+                <div class="timeline-label">{{ log.action }}</div>
+                <div class="timeline-time">{{ log.created_at|date:"m-d H:i:s" }} · {{ log.get_result_display }}</div>
+                {% if log.detail %}<div style="font-size:12px;color:#616161;margin-top:4px;padding:6px 8px;background:#f5f5f5">{{ log.detail }}</div>{% endif %}
+              </div>
+            </div>
+            {% empty %}
+            <div style="font-size:13px;color:#9e9e9e">暂无操作记录</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 确认 Modal -->
+<div class="modal-overlay" id="modalConfirm">
+  <div class="modal">
+    <div class="modal-title">确认调度执行</div>
+    <div class="modal-desc">
+      任务类型：{{ task.get_task_type_display }}<br>
+      计划执行时间：{{ task.scheduled_at|date:"Y-m-d H:i" }}<br><br>
+      确认后系统将在计划时间自动执行，<strong>无法撤销</strong>。
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-default" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmTask()">确认执行</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+function confirmTask() {
+  closeModal();
+  fetch("{% url 'ops_task_confirm' task.id %}", {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'Content-Type': 'application/json',
+    }
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) {
+      showToast('✓ ' + data.message);
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      showToast('✗ ' + data.error, true);
+    }
+  })
+  .catch(() => showToast('✗ 网络错误', true));
+}
+</script>
+{% endblock %}
